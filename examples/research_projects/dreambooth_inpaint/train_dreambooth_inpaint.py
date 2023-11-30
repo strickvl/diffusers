@@ -280,7 +280,7 @@ def parse_args():
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
-    if env_local_rank != -1 and env_local_rank != args.local_rank:
+    if env_local_rank not in [-1, args.local_rank]:
         args.local_rank = env_local_rank
 
     if args.instance_data_dir is None:
@@ -352,15 +352,15 @@ class DreamBoothDataset(Dataset):
         return self._length
 
     def __getitem__(self, index):
-        example = {}
         instance_image = Image.open(self.instance_images_path[index % self.num_instance_images])
-        if not instance_image.mode == "RGB":
+        if instance_image.mode != "RGB":
             instance_image = instance_image.convert("RGB")
         instance_image = self.image_transforms_resize_and_crop(instance_image)
 
-        example["PIL_images"] = instance_image
-        example["instance_images"] = self.image_transforms(instance_image)
-
+        example = {
+            "PIL_images": instance_image,
+            "instance_images": self.image_transforms(instance_image),
+        }
         example["instance_prompt_ids"] = self.tokenizer(
             self.instance_prompt,
             padding="do_not_pad",
@@ -370,7 +370,7 @@ class DreamBoothDataset(Dataset):
 
         if self.class_data_root:
             class_image = Image.open(self.class_images_path[index % self.num_class_images])
-            if not class_image.mode == "RGB":
+            if class_image.mode != "RGB":
                 class_image = class_image.convert("RGB")
             class_image = self.image_transforms_resize_and_crop(class_image)
             example["class_images"] = self.image_transforms(class_image)
@@ -396,20 +396,16 @@ class PromptDataset(Dataset):
         return self.num_samples
 
     def __getitem__(self, index):
-        example = {}
-        example["prompt"] = self.prompt
-        example["index"] = index
-        return example
+        return {"prompt": self.prompt, "index": index}
 
 
 def get_full_repo_name(model_id: str, organization: Optional[str] = None, token: Optional[str] = None):
     if token is None:
         token = HfFolder.get_token()
-    if organization is None:
-        username = whoami(token)["name"]
-        return f"{username}/{model_id}"
-    else:
+    if organization is not None:
         return f"{organization}/{model_id}"
+    username = whoami(token)["name"]
+    return f"{username}/{model_id}"
 
 
 def main():

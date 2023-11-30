@@ -136,11 +136,12 @@ def prepare_image(image):
         if isinstance(image, (PIL.Image.Image, np.ndarray)):
             image = [image]
 
-        if isinstance(image, list) and isinstance(image[0], PIL.Image.Image):
-            image = [np.array(i.convert("RGB"))[None, :] for i in image]
-            image = np.concatenate(image, axis=0)
-        elif isinstance(image, list) and isinstance(image[0], np.ndarray):
-            image = np.concatenate([i[None, :] for i in image], axis=0)
+        if isinstance(image, list):
+            if isinstance(image[0], PIL.Image.Image):
+                image = [np.array(i.convert("RGB"))[None, :] for i in image]
+                image = np.concatenate(image, axis=0)
+            elif isinstance(image[0], np.ndarray):
+                image = np.concatenate([i[None, :] for i in image], axis=0)
 
         image = image.transpose(0, 3, 1, 2)
         image = torch.from_numpy(image).to(dtype=torch.float32) / 127.5 - 1.0
@@ -157,7 +158,7 @@ def prepare_mask_image(mask_image):
             # Single mask, the 0'th dimension is considered to be
             # the existing batch size of 1
             mask_image = mask_image.unsqueeze(0)
-        elif mask_image.ndim == 3 and mask_image.shape[0] != 1:
+        elif mask_image.ndim == 3:
             # Batch of mask, the 0'th dimension is considered to be
             # the batching dimension
             mask_image = mask_image.unsqueeze(1)
@@ -170,11 +171,12 @@ def prepare_mask_image(mask_image):
         if isinstance(mask_image, (PIL.Image.Image, np.ndarray)):
             mask_image = [mask_image]
 
-        if isinstance(mask_image, list) and isinstance(mask_image[0], PIL.Image.Image):
-            mask_image = np.concatenate([np.array(m.convert("L"))[None, None, :] for m in mask_image], axis=0)
-            mask_image = mask_image.astype(np.float32) / 255.0
-        elif isinstance(mask_image, list) and isinstance(mask_image[0], np.ndarray):
-            mask_image = np.concatenate([m[None, None, :] for m in mask_image], axis=0)
+        if isinstance(mask_image, list):
+            if isinstance(mask_image[0], PIL.Image.Image):
+                mask_image = np.concatenate([np.array(m.convert("L"))[None, None, :] for m in mask_image], axis=0)
+                mask_image = mask_image.astype(np.float32) / 255.0
+            elif isinstance(mask_image[0], np.ndarray):
+                mask_image = np.concatenate([m[None, None, :] for m in mask_image], axis=0)
 
         mask_image[mask_image < 0.5] = 0
         mask_image[mask_image >= 0.5] = 1
@@ -204,12 +206,7 @@ def prepare_controlnet_conditioning_image(
 
     image_batch_size = controlnet_conditioning_image.shape[0]
 
-    if image_batch_size == 1:
-        repeat_by = batch_size
-    else:
-        # image batch size is the same as prompt batch size
-        repeat_by = num_images_per_prompt
-
+    repeat_by = batch_size if image_batch_size == 1 else num_images_per_prompt
     controlnet_conditioning_image = controlnet_conditioning_image.repeat_interleave(repeat_by, dim=0)
 
     controlnet_conditioning_image = controlnet_conditioning_image.to(device=device, dtype=dtype)
@@ -341,14 +338,18 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
         """
         if not hasattr(self.unet, "_hf_hook"):
             return self.device
-        for module in self.unet.modules():
-            if (
-                hasattr(module, "_hf_hook")
-                and hasattr(module._hf_hook, "execution_device")
-                and module._hf_hook.execution_device is not None
-            ):
-                return torch.device(module._hf_hook.execution_device)
-        return self.device
+        return next(
+            (
+                torch.device(module._hf_hook.execution_device)
+                for module in self.unet.modules()
+                if (
+                    hasattr(module, "_hf_hook")
+                    and hasattr(module._hf_hook, "execution_device")
+                    and module._hf_hook.execution_device is not None
+                )
+            ),
+            self.device,
+        )
 
     def _encode_prompt(
         self,
@@ -538,8 +539,10 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
         if height % 8 != 0 or width % 8 != 0:
             raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
 
-        if (callback_steps is None) or (
-            callback_steps is not None and (not isinstance(callback_steps, int) or callback_steps <= 0)
+        if (
+            callback_steps is None
+            or not isinstance(callback_steps, int)
+            or callback_steps <= 0
         ):
             raise ValueError(
                 f"`callback_steps` has to be a positive integer but is {callback_steps} of type"
@@ -595,11 +598,8 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
             controlnet_cond_image_batch_size = 1
         elif controlnet_cond_image_is_tensor:
             controlnet_cond_image_batch_size = controlnet_conditioning_image.shape[0]
-        elif controlnet_cond_image_is_pil_list:
+        else:
             controlnet_cond_image_batch_size = len(controlnet_conditioning_image)
-        elif controlnet_cond_image_is_tensor_list:
-            controlnet_cond_image_batch_size = len(controlnet_conditioning_image)
-
         if prompt is not None and isinstance(prompt, str):
             prompt_batch_size = 1
         elif prompt is not None and isinstance(prompt, list):
@@ -607,7 +607,7 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
         elif prompt_embeds is not None:
             prompt_batch_size = prompt_embeds.shape[0]
 
-        if controlnet_cond_image_batch_size != 1 and controlnet_cond_image_batch_size != prompt_batch_size:
+        if controlnet_cond_image_batch_size not in [1, prompt_batch_size]:
             raise ValueError(
                 f"If image batch size is not 1, image batch size must be same as prompt batch size. image batch size: {controlnet_cond_image_batch_size}, prompt batch size: {prompt_batch_size}"
             )
@@ -619,10 +619,10 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
             raise TypeError("if `image` is a PIL image, `mask_image` must also be a PIL image")
 
         if isinstance(image, torch.Tensor):
-            if image.ndim != 3 and image.ndim != 4:
+            if image.ndim not in [3, 4]:
                 raise ValueError("`image` must have 3 or 4 dimensions")
 
-            if mask_image.ndim != 2 and mask_image.ndim != 3 and mask_image.ndim != 4:
+            if mask_image.ndim not in [2, 3, 4]:
                 raise ValueError("`mask_image` must have 2, 3, or 4 dimensions")
 
             if image.ndim == 3:
@@ -638,7 +638,7 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
             elif mask_image.ndim == 3:
                 mask_image_channels = 1
                 mask_image_batch_size, mask_image_height, mask_image_width = mask_image.shape
-            elif mask_image.ndim == 4:
+            else:
                 mask_image_batch_size, mask_image_channels, mask_image_height, mask_image_width = mask_image.shape
 
             if image_channels != 3:
@@ -701,7 +701,7 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
 
         # duplicate mask for each generation per prompt, using mps friendly method
         if mask_image.shape[0] < batch_size:
-            if not batch_size % mask_image.shape[0] == 0:
+            if batch_size % mask_image.shape[0] != 0:
                 raise ValueError(
                     "The passed mask and the required batch size don't match. Masks are supposed to be duplicated to"
                     f" a total batch size of {batch_size}, but {mask_image.shape[0]} masks were passed. Make sure the number"
@@ -711,9 +711,7 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
 
         mask_image = torch.cat([mask_image] * 2) if do_classifier_free_guidance else mask_image
 
-        mask_image_latents = mask_image
-
-        return mask_image_latents
+        return mask_image
 
     def prepare_masked_image_latents(
         self, masked_image, batch_size, height, width, dtype, device, generator, do_classifier_free_guidance
@@ -733,7 +731,7 @@ class StableDiffusionControlNetInpaintPipeline(DiffusionPipeline):
 
         # duplicate masked_image_latents for each generation per prompt, using mps friendly method
         if masked_image_latents.shape[0] < batch_size:
-            if not batch_size % masked_image_latents.shape[0] == 0:
+            if batch_size % masked_image_latents.shape[0] != 0:
                 raise ValueError(
                     "The passed images and the required batch size don't match. Images are supposed to be duplicated"
                     f" to a total batch size of {batch_size}, but {masked_image_latents.shape[0]} images were passed."

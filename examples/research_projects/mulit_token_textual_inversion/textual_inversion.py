@@ -93,7 +93,7 @@ def add_tokens(tokenizer, text_encoder, placeholder_token, num_vec_per_token=1, 
         for i, placeholder_token_id in enumerate(placeholder_token_ids):
             token_embeds[placeholder_token_id] = token_embeds[token_ids[i * len(token_ids) // num_vec_per_token]]
     else:
-        for i, placeholder_token_id in enumerate(placeholder_token_ids):
+        for placeholder_token_id in placeholder_token_ids:
             token_embeds[placeholder_token_id] = torch.randn_like(token_embeds[placeholder_token_id])
     return placeholder_token
 
@@ -129,8 +129,9 @@ def load_multitoken_tokenizer_from_automatic(tokenizer, text_encoder, automatic_
         [ 0.0812, -0.0199, -0.0100,  ..., -0.0581, -0.0780,  0.0254]],
        requires_grad=True)}, 'name': 'FloralMarble-400', 'step': 399, 'sd_checkpoint': '4bdfc29c', 'sd_checkpoint_name': 'SD2.1-768'}
     """
-    learned_embeds_dict = {}
-    learned_embeds_dict[placeholder_token] = automatic_dict["string_to_param"]["*"]
+    learned_embeds_dict = {
+        placeholder_token: automatic_dict["string_to_param"]["*"]
+    }
     load_multitoken_tokenizer(tokenizer, text_encoder, learned_embeds_dict)
 
 
@@ -392,7 +393,7 @@ def parse_args():
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
-    if env_local_rank != -1 and env_local_rank != args.local_rank:
+    if env_local_rank not in [-1, args.local_rank]:
         args.local_rank = env_local_rank
 
     if args.train_data_dir is None:
@@ -503,25 +504,27 @@ class TextualInversionDataset(Dataset):
         return self._length
 
     def __getitem__(self, i):
-        example = {}
         image = Image.open(self.image_paths[i % self.num_images])
 
-        if not image.mode == "RGB":
+        if image.mode != "RGB":
             image = image.convert("RGB")
 
         placeholder_string = self.placeholder_token
         text = random.choice(self.templates).format(placeholder_string)
 
-        example["input_ids"] = self.tokenizer.encode(
-            text,
-            padding="max_length",
-            truncation=True,
-            max_length=self.tokenizer.model_max_length,
-            return_tensors="pt",
-            vector_shuffle=self.vector_shuffle,
-            prop_tokens_to_load=self.prop_tokens_to_load if self.progressive_tokens else 1.0,
-        )[0]
-
+        example = {
+            "input_ids": self.tokenizer.encode(
+                text,
+                padding="max_length",
+                truncation=True,
+                max_length=self.tokenizer.model_max_length,
+                return_tensors="pt",
+                vector_shuffle=self.vector_shuffle,
+                prop_tokens_to_load=self.prop_tokens_to_load
+                if self.progressive_tokens
+                else 1.0,
+            )[0]
+        }
         # default to score-sde preprocessing
         img = np.array(image).astype(np.uint8)
 
@@ -550,11 +553,10 @@ class TextualInversionDataset(Dataset):
 def get_full_repo_name(model_id: str, organization: Optional[str] = None, token: Optional[str] = None):
     if token is None:
         token = HfFolder.get_token()
-    if organization is None:
-        username = whoami(token)["name"]
-        return f"{username}/{model_id}"
-    else:
+    if organization is not None:
         return f"{organization}/{model_id}"
+    username = whoami(token)["name"]
+    return f"{username}/{model_id}"
 
 
 def main():

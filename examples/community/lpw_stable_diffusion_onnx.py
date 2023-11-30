@@ -146,7 +146,7 @@ def parse_prompt_attention(text):
     for pos in square_brackets:
         multiply_range(pos, square_bracket_multiplier)
 
-    if len(res) == 0:
+    if not res:
         res = [["", 1.0]]
 
     # merge runs of identical weights
@@ -232,34 +232,33 @@ def get_unweighted_text_embeddings(
     it should be split into chunks and sent to the text encoder individually.
     """
     max_embeddings_multiples = (text_input.shape[1] - 2) // (chunk_length - 2)
-    if max_embeddings_multiples > 1:
-        text_embeddings = []
-        for i in range(max_embeddings_multiples):
-            # extract the i-th chunk
-            text_input_chunk = text_input[:, i * (chunk_length - 2) : (i + 1) * (chunk_length - 2) + 2].copy()
+    if max_embeddings_multiples <= 1:
+        return pipe.text_encoder(input_ids=text_input)[0]
+    text_embeddings = []
+    for i in range(max_embeddings_multiples):
+        # extract the i-th chunk
+        text_input_chunk = text_input[:, i * (chunk_length - 2) : (i + 1) * (chunk_length - 2) + 2].copy()
 
-            # cover the head and the tail by the starting and the ending tokens
-            text_input_chunk[:, 0] = text_input[0, 0]
-            text_input_chunk[:, -1] = text_input[0, -1]
+        # cover the head and the tail by the starting and the ending tokens
+        text_input_chunk[:, 0] = text_input[0, 0]
+        text_input_chunk[:, -1] = text_input[0, -1]
 
-            text_embedding = pipe.text_encoder(input_ids=text_input_chunk)[0]
+        text_embedding = pipe.text_encoder(input_ids=text_input_chunk)[0]
 
+        if i == 0:
             if no_boseos_middle:
-                if i == 0:
-                    # discard the ending token
-                    text_embedding = text_embedding[:, :-1]
-                elif i == max_embeddings_multiples - 1:
-                    # discard the starting token
-                    text_embedding = text_embedding[:, 1:]
-                else:
-                    # discard both starting and ending tokens
-                    text_embedding = text_embedding[:, 1:-1]
+                # discard the ending token
+                text_embedding = text_embedding[:, :-1]
+        elif i == max_embeddings_multiples - 1:
+            if no_boseos_middle:
+                # discard the starting token
+                text_embedding = text_embedding[:, 1:]
+        elif no_boseos_middle:
+            # discard both starting and ending tokens
+            text_embedding = text_embedding[:, 1:-1]
 
-            text_embeddings.append(text_embedding)
-        text_embeddings = np.concatenate(text_embeddings, axis=1)
-    else:
-        text_embeddings = pipe.text_encoder(input_ids=text_input)[0]
-    return text_embeddings
+        text_embeddings.append(text_embedding)
+    return np.concatenate(text_embeddings, axis=1)
 
 
 def get_weighted_text_embeddings(
@@ -328,9 +327,9 @@ def get_weighted_text_embeddings(
             uncond_weights = [[1.0] * len(token) for token in uncond_tokens]
 
     # round up the longest length of tokens to a multiple of (model_max_length - 2)
-    max_length = max([len(token) for token in prompt_tokens])
+    max_length = max(len(token) for token in prompt_tokens)
     if uncond_prompt is not None:
-        max_length = max(max_length, max([len(token) for token in uncond_tokens]))
+        max_length = max(max_length, max(len(token) for token in uncond_tokens))
 
     max_embeddings_multiples = min(
         max_embeddings_multiples,
@@ -550,8 +549,10 @@ class OnnxStableDiffusionLongPromptWeightingPipeline(OnnxStableDiffusionPipeline
         if height % 8 != 0 or width % 8 != 0:
             raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
 
-        if (callback_steps is None) or (
-            callback_steps is not None and (not isinstance(callback_steps, int) or callback_steps <= 0)
+        if (
+            callback_steps is None
+            or not isinstance(callback_steps, int)
+            or callback_steps <= 0
         ):
             raise ValueError(
                 f"`callback_steps` has to be a positive integer but is {callback_steps} of type"
@@ -561,15 +562,13 @@ class OnnxStableDiffusionLongPromptWeightingPipeline(OnnxStableDiffusionPipeline
     def get_timesteps(self, num_inference_steps, strength, is_text2img):
         if is_text2img:
             return self.scheduler.timesteps, num_inference_steps
-        else:
-            # get the original timestep using init_timestep
-            offset = self.scheduler.config.get("steps_offset", 0)
-            init_timestep = int(num_inference_steps * strength) + offset
-            init_timestep = min(init_timestep, num_inference_steps)
+        # get the original timestep using init_timestep
+        offset = self.scheduler.config.get("steps_offset", 0)
+        init_timestep = int(num_inference_steps * strength) + offset
+        init_timestep = min(init_timestep, num_inference_steps)
 
-            t_start = max(num_inference_steps - init_timestep + offset, 0)
-            timesteps = self.scheduler.timesteps[t_start:]
-            return timesteps, num_inference_steps - t_start
+        t_start = max(num_inference_steps - init_timestep + offset, 0)
+        return self.scheduler.timesteps[t_start:], num_inference_steps - t_start
 
     def run_safety_checker(self, image):
         if self.safety_checker is not None:
@@ -628,9 +627,8 @@ class OnnxStableDiffusionLongPromptWeightingPipeline(OnnxStableDiffusionPipeline
 
             if latents is None:
                 latents = torch.randn(shape, generator=generator, device="cpu").numpy().astype(dtype)
-            else:
-                if latents.shape != shape:
-                    raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {shape}")
+            elif latents.shape != shape:
+                raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {shape}")
 
             # scale the initial noise by the standard deviation required by the scheduler
             latents = (torch.from_numpy(latents) * self.scheduler.init_noise_sigma).numpy()

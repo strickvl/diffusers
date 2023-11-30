@@ -29,8 +29,9 @@ def slerp(val, low, high):
     high_norm = high / torch.norm(high)
     omega = torch.acos((low_norm * high_norm))
     so = torch.sin(omega)
-    res = (torch.sin((1.0 - val) * omega) / so) * low + (torch.sin(val * omega) / so) * high
-    return res
+    return (torch.sin((1.0 - val) * omega) / so) * low + (
+        torch.sin(val * omega) / so
+    ) * high
 
 
 class UnCLIPTextInterpolationPipeline(DiffusionPipeline):
@@ -111,11 +112,11 @@ class UnCLIPTextInterpolationPipeline(DiffusionPipeline):
     def prepare_latents(self, shape, dtype, device, generator, latents, scheduler):
         if latents is None:
             latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
-        else:
-            if latents.shape != shape:
-                raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {shape}")
+        elif latents.shape == shape:
             latents = latents.to(device)
 
+        else:
+            raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {shape}")
         latents = latents * scheduler.init_noise_sigma
         return latents
 
@@ -238,7 +239,6 @@ class UnCLIPTextInterpolationPipeline(DiffusionPipeline):
                 cpu_offload(cpu_offloaded_model, device)
 
     @property
-    # Copied from diffusers.pipelines.unclip.pipeline_unclip.UnCLIPPipeline._execution_device
     def _execution_device(self):
         r"""
         Returns the device on which the pipeline's models will be executed. After calling
@@ -247,14 +247,18 @@ class UnCLIPTextInterpolationPipeline(DiffusionPipeline):
         """
         if self.device != torch.device("meta") or not hasattr(self.decoder, "_hf_hook"):
             return self.device
-        for module in self.decoder.modules():
-            if (
-                hasattr(module, "_hf_hook")
-                and hasattr(module._hf_hook, "execution_device")
-                and module._hf_hook.execution_device is not None
-            ):
-                return torch.device(module._hf_hook.execution_device)
-        return self.device
+        return next(
+            (
+                torch.device(module._hf_hook.execution_device)
+                for module in self.decoder.modules()
+                if (
+                    hasattr(module, "_hf_hook")
+                    and hasattr(module._hf_hook, "execution_device")
+                    and module._hf_hook.execution_device is not None
+                )
+            ),
+            self.device,
+        )
 
     @torch.no_grad()
     def __call__(
@@ -567,7 +571,4 @@ class UnCLIPTextInterpolationPipeline(DiffusionPipeline):
         if output_type == "pil":
             image = self.numpy_to_pil(image)
 
-        if not return_dict:
-            return (image,)
-
-        return ImagePipelineOutput(images=image)
+        return (image, ) if not return_dict else ImagePipelineOutput(images=image)

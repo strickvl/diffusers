@@ -239,15 +239,21 @@ class WildcardStableDiffusionPipeline(DiffusionPipeline):
 
         if isinstance(prompt, str):
             prompt = [
-                replace_prompt_with_wildcards(prompt, wildcard_option_dict, wildcard_files)
-                for i in range(num_prompt_samples)
+                replace_prompt_with_wildcards(
+                    prompt, wildcard_option_dict, wildcard_files
+                )
+                for _ in range(num_prompt_samples)
             ]
             batch_size = len(prompt)
         elif isinstance(prompt, list):
             prompt_list = []
             for p in prompt:
-                for i in range(num_prompt_samples):
-                    prompt_list.append(replace_prompt_with_wildcards(p, wildcard_option_dict, wildcard_files))
+                prompt_list.extend(
+                    replace_prompt_with_wildcards(
+                        p, wildcard_option_dict, wildcard_files
+                    )
+                    for _ in range(num_prompt_samples)
+                )
             prompt = prompt_list
             batch_size = len(prompt)
         else:
@@ -256,8 +262,10 @@ class WildcardStableDiffusionPipeline(DiffusionPipeline):
         if height % 8 != 0 or width % 8 != 0:
             raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
 
-        if (callback_steps is None) or (
-            callback_steps is not None and (not isinstance(callback_steps, int) or callback_steps <= 0)
+        if (
+            callback_steps is None
+            or not isinstance(callback_steps, int)
+            or callback_steps <= 0
         ):
             raise ValueError(
                 f"`callback_steps` has to be a positive integer but is {callback_steps} of type"
@@ -347,11 +355,11 @@ class WildcardStableDiffusionPipeline(DiffusionPipeline):
                 )
             else:
                 latents = torch.randn(latents_shape, generator=generator, device=self.device, dtype=latents_dtype)
-        else:
-            if latents.shape != latents_shape:
-                raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {latents_shape}")
+        elif latents.shape == latents_shape:
             latents = latents.to(self.device)
 
+        else:
+            raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {latents_shape}")
         # set timesteps
         self.scheduler.set_timesteps(num_inference_steps)
 

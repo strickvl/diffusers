@@ -165,7 +165,6 @@ class TextInpainting(DiffusionPipeline):
                 cpu_offload(cpu_offloaded_model, device)
 
     @property
-    # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline._execution_device
     def _execution_device(self):
         r"""
         Returns the device on which the pipeline's models will be executed. After calling
@@ -174,14 +173,18 @@ class TextInpainting(DiffusionPipeline):
         """
         if self.device != torch.device("meta") or not hasattr(self.unet, "_hf_hook"):
             return self.device
-        for module in self.unet.modules():
-            if (
-                hasattr(module, "_hf_hook")
-                and hasattr(module._hf_hook, "execution_device")
-                and module._hf_hook.execution_device is not None
-            ):
-                return torch.device(module._hf_hook.execution_device)
-        return self.device
+        return next(
+            (
+                torch.device(module._hf_hook.execution_device)
+                for module in self.unet.modules()
+                if (
+                    hasattr(module, "_hf_hook")
+                    and hasattr(module._hf_hook, "execution_device")
+                    and module._hf_hook.execution_device is not None
+                )
+            ),
+            self.device,
+        )
 
     @torch.no_grad()
     def __call__(

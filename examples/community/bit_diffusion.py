@@ -258,7 +258,4 @@ class BitDiffusion(DiffusionPipeline):
         if output_type == "pil":
             image = self.numpy_to_pil(image)
 
-        if not return_dict:
-            return (image,)
-
-        return ImagePipelineOutput(images=image)
+        return (image, ) if not return_dict else ImagePipelineOutput(images=image)

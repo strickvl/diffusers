@@ -96,9 +96,7 @@ class DDIMNoiseComparativeAnalysisPipeline(DiffusionPipeline):
         # get latents
         print("add noise to latents at timestep", timestep)
         init_latents = self.scheduler.add_noise(init_latents, noise, timestep)
-        latents = init_latents
-
-        return latents
+        return init_latents
 
     @torch.no_grad()
     def __call__(

@@ -179,8 +179,10 @@ class SeedResizeStableDiffusionPipeline(DiffusionPipeline):
         if height % 8 != 0 or width % 8 != 0:
             raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
 
-        if (callback_steps is None) or (
-            callback_steps is not None and (not isinstance(callback_steps, int) or callback_steps <= 0)
+        if (
+            callback_steps is None
+            or not isinstance(callback_steps, int)
+            or callback_steps <= 0
         ):
             raise ValueError(
                 f"`callback_steps` has to be a positive integer but is {callback_steps} of type"
@@ -292,8 +294,8 @@ class SeedResizeStableDiffusionPipeline(DiffusionPipeline):
         dy = (latents_shape[2] - latents_shape_reference[2]) // 2
         w = latents_shape_reference[3] if dx >= 0 else latents_shape_reference[3] + 2 * dx
         h = latents_shape_reference[2] if dy >= 0 else latents_shape_reference[2] + 2 * dy
-        tx = 0 if dx < 0 else dx
-        ty = 0 if dy < 0 else dy
+        tx = max(dx, 0)
+        ty = max(dy, 0)
         dx = max(-dx, 0)
         dy = max(-dy, 0)
         # import pdb
