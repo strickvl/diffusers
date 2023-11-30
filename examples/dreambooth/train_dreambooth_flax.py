@@ -203,7 +203,7 @@ def parse_args():
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
-    if env_local_rank != -1 and env_local_rank != args.local_rank:
+    if env_local_rank not in [-1, args.local_rank]:
         args.local_rank = env_local_rank
 
     if args.instance_data_dir is None:
@@ -274,11 +274,10 @@ class DreamBoothDataset(Dataset):
         return self._length
 
     def __getitem__(self, index):
-        example = {}
         instance_image = Image.open(self.instance_images_path[index % self.num_instance_images])
-        if not instance_image.mode == "RGB":
+        if instance_image.mode != "RGB":
             instance_image = instance_image.convert("RGB")
-        example["instance_images"] = self.image_transforms(instance_image)
+        example = {"instance_images": self.image_transforms(instance_image)}
         example["instance_prompt_ids"] = self.tokenizer(
             self.instance_prompt,
             padding="do_not_pad",
@@ -288,7 +287,7 @@ class DreamBoothDataset(Dataset):
 
         if self.class_data_root:
             class_image = Image.open(self.class_images_path[index % self.num_class_images])
-            if not class_image.mode == "RGB":
+            if class_image.mode != "RGB":
                 class_image = class_image.convert("RGB")
             example["class_images"] = self.image_transforms(class_image)
             example["class_prompt_ids"] = self.tokenizer(
@@ -312,20 +311,16 @@ class PromptDataset(Dataset):
         return self.num_samples
 
     def __getitem__(self, index):
-        example = {}
-        example["prompt"] = self.prompt
-        example["index"] = index
-        return example
+        return {"prompt": self.prompt, "index": index}
 
 
 def get_full_repo_name(model_id: str, organization: Optional[str] = None, token: Optional[str] = None):
     if token is None:
         token = HfFolder.get_token()
-    if organization is None:
-        username = whoami(token)["name"]
-        return f"{username}/{model_id}"
-    else:
+    if organization is not None:
         return f"{organization}/{model_id}"
+    username = whoami(token)["name"]
+    return f"{username}/{model_id}"
 
 
 def get_params_to_save(params):
@@ -371,9 +366,7 @@ def main():
             total_sample_batch_size = args.sample_batch_size * jax.local_device_count()
             sample_dataloader = torch.utils.data.DataLoader(sample_dataset, batch_size=total_sample_batch_size)
 
-            for example in tqdm(
-                sample_dataloader, desc="Generating class images", disable=not jax.process_index() == 0
-            ):
+            for example in tqdm(sample_dataloader, desc="Generating class images", disable=jax.process_index() != 0):
                 prompt_ids = pipeline.prepare_inputs(example["prompt"])
                 prompt_ids = shard(prompt_ids)
                 p_params = jax_utils.replicate(params)

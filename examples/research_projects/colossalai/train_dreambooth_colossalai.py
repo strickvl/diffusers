@@ -231,7 +231,7 @@ def parse_args(input_args=None):
         args = parser.parse_args()
 
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
-    if env_local_rank != -1 and env_local_rank != args.local_rank:
+    if env_local_rank not in [-1, args.local_rank]:
         args.local_rank = env_local_rank
 
     if args.with_prior_preservation:
@@ -300,11 +300,10 @@ class DreamBoothDataset(Dataset):
         return self._length
 
     def __getitem__(self, index):
-        example = {}
         instance_image = Image.open(self.instance_images_path[index % self.num_instance_images])
-        if not instance_image.mode == "RGB":
+        if instance_image.mode != "RGB":
             instance_image = instance_image.convert("RGB")
-        example["instance_images"] = self.image_transforms(instance_image)
+        example = {"instance_images": self.image_transforms(instance_image)}
         example["instance_prompt_ids"] = self.tokenizer(
             self.instance_prompt,
             padding="do_not_pad",
@@ -314,7 +313,7 @@ class DreamBoothDataset(Dataset):
 
         if self.class_data_root:
             class_image = Image.open(self.class_images_path[index % self.num_class_images])
-            if not class_image.mode == "RGB":
+            if class_image.mode != "RGB":
                 class_image = class_image.convert("RGB")
             example["class_images"] = self.image_transforms(class_image)
             example["class_prompt_ids"] = self.tokenizer(
@@ -338,20 +337,16 @@ class PromptDataset(Dataset):
         return self.num_samples
 
     def __getitem__(self, index):
-        example = {}
-        example["prompt"] = self.prompt
-        example["index"] = index
-        return example
+        return {"prompt": self.prompt, "index": index}
 
 
 def get_full_repo_name(model_id: str, organization: Optional[str] = None, token: Optional[str] = None):
     if token is None:
         token = HfFolder.get_token()
-    if organization is None:
-        username = whoami(token)["name"]
-        return f"{username}/{model_id}"
-    else:
+    if organization is not None:
         return f"{organization}/{model_id}"
+    username = whoami(token)["name"]
+    return f"{username}/{model_id}"
 
 
 # Gemini + ZeRO DDP
@@ -397,11 +392,7 @@ def main(args):
 
             pipeline.to(get_current_device())
 
-            for example in tqdm(
-                sample_dataloader,
-                desc="Generating class images",
-                disable=not local_rank == 0,
-            ):
+            for example in tqdm(sample_dataloader, desc="Generating class images", disable=local_rank != 0):
                 images = pipeline(example["prompt"]).images
 
                 for i, image in enumerate(images):
@@ -576,7 +567,7 @@ def main(args):
     logger.info(f"  Total optimization steps = {args.max_train_steps}", ranks=[0])
 
     # Only show the progress bar once on each machine.
-    progress_bar = tqdm(range(args.max_train_steps), disable=not local_rank == 0)
+    progress_bar = tqdm(range(args.max_train_steps), disable=local_rank != 0)
     progress_bar.set_description("Steps")
     global_step = 0
 

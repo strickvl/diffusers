@@ -129,13 +129,9 @@ def log_validation(vae, text_encoder, tokenizer, unet, controlnet, args, acceler
                 validation_prompt = log["validation_prompt"]
                 validation_image = log["validation_image"]
 
-                formatted_images = []
+                formatted_images = [np.asarray(validation_image)]
 
-                formatted_images.append(np.asarray(validation_image))
-
-                for image in images:
-                    formatted_images.append(np.asarray(image))
-
+                formatted_images.extend(np.asarray(image) for image in images)
                 formatted_images = np.stack(formatted_images)
 
                 tracker.writer.add_images(validation_prompt, formatted_images, step, dataformats="NHWC")
@@ -516,7 +512,6 @@ def parse_args(input_args=None):
 
     if (
         args.validation_image is not None
-        and args.validation_prompt is not None
         and len(args.validation_image) != 1
         and len(args.validation_prompt) != 1
         and len(args.validation_image) != len(args.validation_prompt)
@@ -664,11 +659,10 @@ def collate_fn(examples):
 def get_full_repo_name(model_id: str, organization: Optional[str] = None, token: Optional[str] = None):
     if token is None:
         token = HfFolder.get_token()
-    if organization is None:
-        username = whoami(token)["name"]
-        return f"{username}/{model_id}"
-    else:
+    if organization is not None:
         return f"{organization}/{model_id}"
+    username = whoami(token)["name"]
+    return f"{username}/{model_id}"
 
 
 def main(args):

@@ -50,7 +50,7 @@ class MultiTokenCLIPTokenizer(CLIPTokenizer):
         else:
             output = []
             for i in range(num_vec_per_token):
-                ith_token = placeholder_token + f"_{i}"
+                ith_token = f"{placeholder_token}_{i}"
                 self.try_adding_tokens(ith_token, *args, **kwargs)
                 output.append(ith_token)
         # handle cases where there is a new placeholder token that contains the current placeholder token but is larger
@@ -70,10 +70,12 @@ class MultiTokenCLIPTokenizer(CLIPTokenizer):
         where shuffling tokens were found to force the model to learn the concepts more descriptively.
         """
         if isinstance(text, list):
-            output = []
-            for i in range(len(text)):
-                output.append(self.replace_placeholder_tokens_in_text(text[i], vector_shuffle=vector_shuffle))
-            return output
+            return [
+                self.replace_placeholder_tokens_in_text(
+                    text[i], vector_shuffle=vector_shuffle
+                )
+                for i in range(len(text))
+            ]
         for placeholder_token in self.token_map:
             if placeholder_token in text:
                 tokens = self.token_map[placeholder_token]

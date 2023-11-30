@@ -157,23 +157,27 @@ class StableUnCLIPPipeline(DiffusionPipeline):
         """
         if self.device != torch.device("meta") or not hasattr(self.prior, "_hf_hook"):
             return self.device
-        for module in self.prior.modules():
-            if (
-                hasattr(module, "_hf_hook")
-                and hasattr(module._hf_hook, "execution_device")
-                and module._hf_hook.execution_device is not None
-            ):
-                return torch.device(module._hf_hook.execution_device)
-        return self.device
+        return next(
+            (
+                torch.device(module._hf_hook.execution_device)
+                for module in self.prior.modules()
+                if (
+                    hasattr(module, "_hf_hook")
+                    and hasattr(module._hf_hook, "execution_device")
+                    and module._hf_hook.execution_device is not None
+                )
+            ),
+            self.device,
+        )
 
     def prepare_latents(self, shape, dtype, device, generator, latents, scheduler):
         if latents is None:
             latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
-        else:
-            if latents.shape != shape:
-                raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {shape}")
+        elif latents.shape == shape:
             latents = latents.to(device)
 
+        else:
+            raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {shape}")
         latents = latents * scheduler.init_noise_sigma
         return latents
 
@@ -201,16 +205,15 @@ class StableUnCLIPPipeline(DiffusionPipeline):
         output_type: Optional[str] = "pil",
         return_dict: bool = True,
     ):
-        if prompt is not None:
-            if isinstance(prompt, str):
-                batch_size = 1
-            elif isinstance(prompt, list):
-                batch_size = len(prompt)
-            else:
-                raise ValueError(f"`prompt` has to be of type `str` or `list` but is {type(prompt)}")
-        else:
+        if prompt is None:
             batch_size = text_model_output[0].shape[0]
 
+        elif isinstance(prompt, str):
+            batch_size = 1
+        elif isinstance(prompt, list):
+            batch_size = len(prompt)
+        else:
+            raise ValueError(f"`prompt` has to be of type `str` or `list` but is {type(prompt)}")
         device = self._execution_device
 
         batch_size = batch_size * num_images_per_prompt
@@ -272,7 +275,7 @@ class StableUnCLIPPipeline(DiffusionPipeline):
 
         image_embeddings = prior_latents
 
-        output = self.decoder_pipe(
+        return self.decoder_pipe(
             image=image_embeddings,
             height=height,
             width=width,
@@ -284,4 +287,3 @@ class StableUnCLIPPipeline(DiffusionPipeline):
             num_images_per_prompt=decoder_num_images_per_prompt,
             eta=decoder_eta,
         )
-        return output

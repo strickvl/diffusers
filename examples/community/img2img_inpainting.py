@@ -256,8 +256,10 @@ class ImageToImageInpaintingPipeline(DiffusionPipeline):
         if height % 8 != 0 or width % 8 != 0:
             raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
 
-        if (callback_steps is None) or (
-            callback_steps is not None and (not isinstance(callback_steps, int) or callback_steps <= 0)
+        if (
+            callback_steps is None
+            or not isinstance(callback_steps, int)
+            or callback_steps <= 0
         ):
             raise ValueError(
                 f"`callback_steps` has to be a positive integer but is {callback_steps} of type"
@@ -352,11 +354,11 @@ class ImageToImageInpaintingPipeline(DiffusionPipeline):
                 )
             else:
                 latents = torch.randn(latents_shape, generator=generator, device=self.device, dtype=latents_dtype)
-        else:
-            if latents.shape != latents_shape:
-                raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {latents_shape}")
+        elif latents.shape == latents_shape:
             latents = latents.to(self.device)
 
+        else:
+            raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {latents_shape}")
         # overlay the inner image
         image = overlay_inner_image(image, inner_image)
 

@@ -233,7 +233,7 @@ class CLIPGuidedStableDiffusion(DiffusionPipeline):
             deprecate("len(prompt) != len(image)", "1.0.0", deprecation_message, standard_warn=False)
             additional_image_per_prompt = batch_size // init_latents.shape[0]
             init_latents = torch.cat([init_latents] * additional_image_per_prompt, dim=0)
-        elif batch_size > init_latents.shape[0] and batch_size % init_latents.shape[0] != 0:
+        elif batch_size > init_latents.shape[0]:
             raise ValueError(
                 f"Cannot duplicate `image` of batch size {init_latents.shape[0]} to {batch_size} text prompts."
             )
@@ -245,9 +245,7 @@ class CLIPGuidedStableDiffusion(DiffusionPipeline):
 
         # get latents
         init_latents = self.scheduler.add_noise(init_latents, noise, timestep)
-        latents = init_latents
-
-        return latents
+        return init_latents
 
     @torch.enable_grad()
     def cond_fn(
@@ -424,11 +422,11 @@ class CLIPGuidedStableDiffusion(DiffusionPipeline):
                 )
             else:
                 latents = torch.randn(latents_shape, generator=generator, device=self.device, dtype=latents_dtype)
-        else:
-            if latents.shape != latents_shape:
-                raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {latents_shape}")
+        elif latents.shape == latents_shape:
             latents = latents.to(self.device)
 
+        else:
+            raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {latents_shape}")
         # scale the initial noise by the standard deviation required by the scheduler
         latents = latents * self.scheduler.init_noise_sigma
 

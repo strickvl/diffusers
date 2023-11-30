@@ -74,11 +74,12 @@ def prepare_image(image):
         if isinstance(image, (PIL.Image.Image, np.ndarray)):
             image = [image]
 
-        if isinstance(image, list) and isinstance(image[0], PIL.Image.Image):
-            image = [np.array(i.convert("RGB"))[None, :] for i in image]
-            image = np.concatenate(image, axis=0)
-        elif isinstance(image, list) and isinstance(image[0], np.ndarray):
-            image = np.concatenate([i[None, :] for i in image], axis=0)
+        if isinstance(image, list):
+            if isinstance(image[0], PIL.Image.Image):
+                image = [np.array(i.convert("RGB"))[None, :] for i in image]
+                image = np.concatenate(image, axis=0)
+            elif isinstance(image[0], np.ndarray):
+                image = np.concatenate([i[None, :] for i in image], axis=0)
 
         image = image.transpose(0, 3, 1, 2)
         image = torch.from_numpy(image).to(dtype=torch.float32) / 127.5 - 1.0
@@ -114,12 +115,7 @@ def prepare_controlnet_conditioning_image(
 
     image_batch_size = controlnet_conditioning_image.shape[0]
 
-    if image_batch_size == 1:
-        repeat_by = batch_size
-    else:
-        # image batch size is the same as prompt batch size
-        repeat_by = num_images_per_prompt
-
+    repeat_by = batch_size if image_batch_size == 1 else num_images_per_prompt
     controlnet_conditioning_image = controlnet_conditioning_image.repeat_interleave(repeat_by, dim=0)
 
     controlnet_conditioning_image = controlnet_conditioning_image.to(device=device, dtype=dtype)
@@ -257,14 +253,18 @@ class StableDiffusionControlNetImg2ImgPipeline(DiffusionPipeline):
         """
         if not hasattr(self.unet, "_hf_hook"):
             return self.device
-        for module in self.unet.modules():
-            if (
-                hasattr(module, "_hf_hook")
-                and hasattr(module._hf_hook, "execution_device")
-                and module._hf_hook.execution_device is not None
-            ):
-                return torch.device(module._hf_hook.execution_device)
-        return self.device
+        return next(
+            (
+                torch.device(module._hf_hook.execution_device)
+                for module in self.unet.modules()
+                if (
+                    hasattr(module, "_hf_hook")
+                    and hasattr(module._hf_hook, "execution_device")
+                    and module._hf_hook.execution_device is not None
+                )
+            ),
+            self.device,
+        )
 
     def _encode_prompt(
         self,
@@ -453,13 +453,8 @@ class StableDiffusionControlNetImg2ImgPipeline(DiffusionPipeline):
             image_batch_size = 1
         elif image_is_tensor:
             image_batch_size = image.shape[0]
-        elif image_is_pil_list:
-            image_batch_size = len(image)
-        elif image_is_tensor_list:
-            image_batch_size = len(image)
         else:
-            raise ValueError("controlnet condition image is not valid")
-
+            image_batch_size = len(image)
         if prompt is not None and isinstance(prompt, str):
             prompt_batch_size = 1
         elif prompt is not None and isinstance(prompt, list):
@@ -469,7 +464,7 @@ class StableDiffusionControlNetImg2ImgPipeline(DiffusionPipeline):
         else:
             raise ValueError("prompt or prompt_embeds are not valid")
 
-        if image_batch_size != 1 and image_batch_size != prompt_batch_size:
+        if image_batch_size not in [1, prompt_batch_size]:
             raise ValueError(
                 f"If image batch size is not 1, image batch size must be same as prompt batch size. image batch size: {image_batch_size}, prompt batch size: {prompt_batch_size}"
             )
@@ -493,8 +488,10 @@ class StableDiffusionControlNetImg2ImgPipeline(DiffusionPipeline):
         if height % 8 != 0 or width % 8 != 0:
             raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
 
-        if (callback_steps is None) or (
-            callback_steps is not None and (not isinstance(callback_steps, int) or callback_steps <= 0)
+        if (
+            callback_steps is None
+            or not isinstance(callback_steps, int)
+            or callback_steps <= 0
         ):
             raise ValueError(
                 f"`callback_steps` has to be a positive integer but is {callback_steps} of type"
@@ -562,17 +559,14 @@ class StableDiffusionControlNetImg2ImgPipeline(DiffusionPipeline):
             assert False
 
         if isinstance(image, torch.Tensor):
-            if image.ndim != 3 and image.ndim != 4:
+            if image.ndim not in [3, 4]:
                 raise ValueError("`image` must have 3 or 4 dimensions")
 
             if image.ndim == 3:
                 image_batch_size = 1
                 image_channels, image_height, image_width = image.shape
-            elif image.ndim == 4:
-                image_batch_size, image_channels, image_height, image_width = image.shape
             else:
-                assert False
-
+                image_batch_size, image_channels, image_height, image_width = image.shape
             if image_channels != 3:
                 raise ValueError("`image` must have 3 channels")
 
@@ -651,9 +645,7 @@ class StableDiffusionControlNetImg2ImgPipeline(DiffusionPipeline):
 
         # get latents
         init_latents = self.scheduler.add_noise(init_latents, noise, timestep)
-        latents = init_latents
-
-        return latents
+        return init_latents
 
     def _default_height_width(self, height, width, image):
         if isinstance(image, list):

@@ -181,8 +181,7 @@ class DepsTableUpdateCommand(Command):
 extras = {}
 
 
-extras = {}
-extras["quality"] = deps_list("black", "isort", "ruff", "hf-doc-builder")
+extras = {"quality": deps_list("black", "isort", "ruff", "hf-doc-builder")}
 extras["docs"] = deps_list("hf-doc-builder")
 extras["training"] = deps_list("accelerate", "datasets", "protobuf", "tensorboard", "Jinja2")
 extras["test"] = deps_list(
@@ -205,11 +204,7 @@ extras["test"] = deps_list(
 )
 extras["torch"] = deps_list("torch", "accelerate")
 
-if os.name == "nt":  # windows
-    extras["flax"] = []  # jax is not supported on windows
-else:
-    extras["flax"] = deps_list("jax", "jaxlib", "flax")
-
+extras["flax"] = [] if os.name == "nt" else deps_list("jax", "jaxlib", "flax")
 extras["dev"] = (
     extras["quality"] + extras["test"] + extras["training"] + extras["docs"] + extras["torch"] + extras["flax"]
 )
